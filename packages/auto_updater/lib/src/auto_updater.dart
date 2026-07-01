@@ -18,6 +18,7 @@ class AutoUpdater {
   final List<UpdaterListener> _listeners = [];
 
   void _handleSparkleEvents(event) {
+    print('AutoUpdater Event Received: type=${event['type']}, data=${event['data']}');
     UpdaterError? updaterError;
     Appcast? appcast;
     AppcastItem? appcastItem;
@@ -82,11 +83,13 @@ class AutoUpdater {
 
   /// Sets the url and initialize the auto updater.
   Future<void> setFeedURL(String feedUrl) {
+    print('AutoUpdater calling setFeedURL: $feedUrl');
     return _platform.setFeedURL(feedUrl);
   }
 
   /// Asks the server whether there is an update. You must call setFeedURL before using this API.
   Future<void> checkForUpdates({bool? inBackground}) {
+    print('AutoUpdater calling checkForUpdates: inBackground=$inBackground');
     return _platform.checkForUpdates(
       inBackground: inBackground,
     );
@@ -95,6 +98,12 @@ class AutoUpdater {
   /// Sets the auto update check interval, default 86400, minimum 3600, 0 to disable update
   Future<void> setScheduledCheckInterval(int interval) {
     return _platform.setScheduledCheckInterval(interval);
+  }
+
+  /// Sets custom HTTP headers for appcast checks.
+  Future<void> setHttpHeaders(Map<String, String> headers) {
+    print('AutoUpdater calling setHttpHeaders: $headers');
+    return _platform.setHttpHeaders(headers);
   }
 }
 

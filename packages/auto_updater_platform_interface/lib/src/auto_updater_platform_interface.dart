@@ -42,4 +42,9 @@ abstract class AutoUpdaterPlatform extends PlatformInterface {
       'setScheduledCheckInterval() has not been implemented.',
     );
   }
+
+  /// Sets custom HTTP headers for appcast checks.
+  Future<void> setHttpHeaders(Map<String, String> headers) async {
+    throw UnimplementedError('setHttpHeaders() has not been implemented.');
+  }
 }

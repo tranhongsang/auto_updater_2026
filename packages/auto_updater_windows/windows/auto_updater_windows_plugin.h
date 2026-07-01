@@ -17,7 +17,6 @@ class AutoUpdaterWindowsPlugin
       flutter::StreamHandler<flutter::EncodableValue> {
  private:
   flutter::PluginRegistrarWindows* registrar_;
-  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
   AutoUpdater auto_updater = AutoUpdater();
 
  public:

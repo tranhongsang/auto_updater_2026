@@ -44,4 +44,12 @@ class MethodChannelAutoUpdater extends AutoUpdaterPlatform {
     };
     await methodChannel.invokeMethod('setScheduledCheckInterval', arguments);
   }
+
+  @override
+  Future<void> setHttpHeaders(Map<String, String> headers) async {
+    final Map<String, dynamic> arguments = {
+      'headers': headers,
+    };
+    await methodChannel.invokeMethod('setHttpHeaders', arguments);
+  }
 }
