@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:auto_updater/src/appcast.dart';
 import 'package:auto_updater/src/updater_error.dart';
@@ -65,11 +67,14 @@ class AutoUpdater {
           listener.onUpdaterUpdateDownloaded(appcastItem);
           break;
         case 'before-quit-for-update':
+          _proxy?.stop();
           listener.onUpdaterBeforeQuitForUpdate(appcastItem);
           break;
       }
     }
   }
+
+  LocalUpdateProxy? _proxy;
 
   /// Adds a listener to the auto updater.
   void addListener(UpdaterListener listener) {
@@ -82,9 +87,24 @@ class AutoUpdater {
   }
 
   /// Sets the url and initialize the auto updater.
-  Future<void> setFeedURL(String feedUrl) {
+  Future<void> setFeedURL(String feedUrl) async {
     print('AutoUpdater calling setFeedURL: $feedUrl');
-    return _platform.setFeedURL(feedUrl);
+    String finalFeedUrl = feedUrl;
+    if (Platform.isWindows && feedUrl.startsWith('http')) {
+      try {
+        if (_proxy != null) {
+          await _proxy!.stop();
+          _proxy = null;
+        }
+        _proxy = LocalUpdateProxy(feedUrl);
+        final int port = await _proxy!.start();
+        finalFeedUrl = 'http://localhost:$port/feed.xml';
+        print('AutoUpdater proxy started on port $port, forwarding to local feed: $finalFeedUrl');
+      } catch (e) {
+        print('AutoUpdater failed to start proxy: $e');
+      }
+    }
+    return _platform.setFeedURL(finalFeedUrl);
   }
 
   /// Asks the server whether there is an update. You must call setFeedURL before using this API.
@@ -108,3 +128,118 @@ class AutoUpdater {
 }
 
 final autoUpdater = AutoUpdater.instance;
+
+class LocalUpdateProxy {
+  HttpServer? _server;
+  final String realXmlUrl;
+  String? realExeUrl;
+  final HttpClient _client = HttpClient()
+    ..badCertificateCallback = ((X509Certificate cert, String host, int port) => true)
+    ..connectionTimeout = const Duration(seconds: 15);
+
+  LocalUpdateProxy(this.realXmlUrl);
+
+  Future<int> start() async {
+    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    _server!.listen(_handleRequest, onError: (e) {
+      print('Proxy server error: $e');
+    });
+    return _server!.port;
+  }
+
+  void _handleRequest(HttpRequest request) async {
+    try {
+      final path = request.uri.path;
+      if (path == '/feed.xml') {
+        final realUri = Uri.parse(realXmlUrl);
+        final clientReq = await _client.getUrl(realUri);
+        
+        // Copy headers from original request if any
+        request.headers.forEach((name, values) {
+          if (name.toLowerCase() != 'host' && name.toLowerCase() != 'connection') {
+            for (var val in values) {
+              clientReq.headers.add(name, val);
+            }
+          }
+        });
+
+        final clientRes = await clientReq.close();
+        
+        if (clientRes.statusCode != 200) {
+          request.response.statusCode = clientRes.statusCode;
+          await request.response.close();
+          return;
+        }
+
+        final xmlContent = await utf8.decoder.bind(clientRes).join();
+        
+        // Parse the enclosure url from XML
+        final match = RegExp(r'url="([^"]+)"').firstMatch(xmlContent);
+        if (match != null) {
+          final extractedUrl = match.group(1)!;
+          realExeUrl = Uri.parse(realXmlUrl).resolve(extractedUrl).toString();
+          print('Proxy found and resolved real exe URL: $realExeUrl');
+        }
+
+        // Rewrite url in enclosure to point to our local server
+        final myPort = _server!.port;
+        var modifiedXml = xmlContent;
+        if (realExeUrl != null) {
+          modifiedXml = xmlContent.replaceAll(
+            match!.group(1)!,
+            'http://localhost:$myPort/download.exe',
+          );
+        }
+
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.contentType = ContentType.parse('application/xml; charset=utf-8');
+        request.response.write(modifiedXml);
+        await request.response.close();
+      } else if (path == '/download.exe') {
+        if (realExeUrl == null) {
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+          return;
+        }
+
+        final realUri = Uri.parse(realExeUrl!);
+        final clientReq = await _client.getUrl(realUri);
+        
+        // Copy headers
+        request.headers.forEach((name, values) {
+          if (name.toLowerCase() != 'host' && name.toLowerCase() != 'connection') {
+            for (var val in values) {
+              clientReq.headers.add(name, val);
+            }
+          }
+        });
+
+        final clientRes = await clientReq.close();
+        
+        request.response.statusCode = clientRes.statusCode;
+        // Copy response headers
+        clientRes.headers.forEach((name, values) {
+          for (var val in values) {
+            request.response.headers.add(name, val);
+          }
+        });
+
+        await request.response.addStream(clientRes);
+        await request.response.close();
+      } else {
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+      }
+    } catch (e) {
+      print('Proxy request handling error: $e');
+      request.response.statusCode = HttpStatus.internalServerError;
+      try {
+        await request.response.close();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> stop() async {
+    await _server?.close(force: true);
+  }
+}
