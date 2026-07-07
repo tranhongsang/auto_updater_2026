@@ -133,6 +133,7 @@ class LocalUpdateProxy {
   HttpServer? _server;
   final String realXmlUrl;
   String? realExeUrl;
+  String? realReleaseNotesUrl;
   final HttpClient _client = HttpClient()
     ..badCertificateCallback = ((X509Certificate cert, String host, int port) => true)
     ..connectionTimeout = const Duration(seconds: 15);
@@ -187,13 +188,27 @@ class LocalUpdateProxy {
           print('Proxy found and resolved real exe URL: $realExeUrl');
         }
 
-        // Rewrite url in enclosure to point to our local server
+        // Parse the release notes url if any
+        final notesMatch = RegExp(r'<(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>([^<]+)</(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>').firstMatch(xmlContent);
+        if (notesMatch != null) {
+          final extractedNotesUrl = notesMatch.group(1)!.trim();
+          realReleaseNotesUrl = Uri.parse(realXmlUrl).resolve(extractedNotesUrl).toString().replaceAll('&amp;', '&');
+          print('Proxy found and resolved real release notes URL: $realReleaseNotesUrl');
+        }
+
+        // Rewrite urls in XML to point to our local server
         final myPort = _server!.port;
         var modifiedXml = xmlContent;
-        if (realExeUrl != null) {
-          modifiedXml = xmlContent.replaceAll(
-            match!.group(1)!,
+        if (realExeUrl != null && match != null) {
+          modifiedXml = modifiedXml.replaceAll(
+            match.group(1)!,
             'http://localhost:$myPort/download.exe',
+          );
+        }
+        if (realReleaseNotesUrl != null && notesMatch != null) {
+          modifiedXml = modifiedXml.replaceAll(
+            notesMatch.group(1)!,
+            'http://localhost:$myPort/release_notes.html',
           );
         }
 
@@ -209,6 +224,43 @@ class LocalUpdateProxy {
         }
 
         final realUri = Uri.parse(realExeUrl!);
+        final clientReq = await _client.getUrl(realUri);
+        
+        // Copy headers
+        request.headers.forEach((name, values) {
+          if (name.toLowerCase() != 'host' && name.toLowerCase() != 'connection') {
+            for (var val in values) {
+              clientReq.headers.add(name, val);
+            }
+          }
+        });
+        if (clientReq.headers.value(HttpHeaders.userAgentHeader) == null) {
+          clientReq.headers.set(
+            HttpHeaders.userAgentHeader,
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          );
+        }
+
+        final clientRes = await clientReq.close();
+        
+        request.response.statusCode = clientRes.statusCode;
+        // Copy response headers
+        clientRes.headers.forEach((name, values) {
+          for (var val in values) {
+            request.response.headers.add(name, val);
+          }
+        });
+
+        await request.response.addStream(clientRes);
+        await request.response.close();
+      } else if (path == '/release_notes.html') {
+        if (realReleaseNotesUrl == null) {
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+          return;
+        }
+
+        final realUri = Uri.parse(realReleaseNotesUrl!);
         final clientReq = await _client.getUrl(realUri);
         
         // Copy headers
