@@ -185,7 +185,6 @@ class LocalUpdateProxy {
         if (match != null) {
           final extractedUrl = match.group(1)!;
           realExeUrl = Uri.parse(realXmlUrl).resolve(extractedUrl).toString();
-          print('Proxy found and resolved real exe URL: $realExeUrl');
         }
 
         // Parse the release notes url if any
@@ -193,7 +192,6 @@ class LocalUpdateProxy {
         if (notesMatch != null) {
           final extractedNotesUrl = notesMatch.group(1)!.trim();
           realReleaseNotesUrl = Uri.parse(realXmlUrl).resolve(extractedNotesUrl).toString().replaceAll('&amp;', '&');
-          print('Proxy found and resolved real release notes URL: $realReleaseNotesUrl');
         }
 
         // Rewrite urls in XML to point to our local server
@@ -254,41 +252,48 @@ class LocalUpdateProxy {
         await request.response.addStream(clientRes);
         await request.response.close();
       } else if (path == '/release_notes.html') {
-        if (realReleaseNotesUrl == null) {
-          request.response.statusCode = HttpStatus.notFound;
-          await request.response.close();
-          return;
-        }
+        try {
+          if (realReleaseNotesUrl != null) {
+            final realUri = Uri.parse(realReleaseNotesUrl!);
+            final clientReq = await _client.getUrl(realUri);
+            
+            // Copy headers
+            request.headers.forEach((name, values) {
+              if (name.toLowerCase() != 'host' && name.toLowerCase() != 'connection') {
+                for (var val in values) {
+                  clientReq.headers.add(name, val);
+                }
+              }
+            });
+            if (clientReq.headers.value(HttpHeaders.userAgentHeader) == null) {
+              clientReq.headers.set(
+                HttpHeaders.userAgentHeader,
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              );
+            }
 
-        final realUri = Uri.parse(realReleaseNotesUrl!);
-        final clientReq = await _client.getUrl(realUri);
-        
-        // Copy headers
-        request.headers.forEach((name, values) {
-          if (name.toLowerCase() != 'host' && name.toLowerCase() != 'connection') {
-            for (var val in values) {
-              clientReq.headers.add(name, val);
+            final clientRes = await clientReq.close();
+            if (clientRes.statusCode == HttpStatus.ok) {
+              request.response.statusCode = clientRes.statusCode;
+              // Copy response headers
+              clientRes.headers.forEach((name, values) {
+                for (var val in values) {
+                  request.response.headers.add(name, val);
+                }
+              });
+              await request.response.addStream(clientRes);
+              await request.response.close();
+              return;
             }
           }
-        });
-        if (clientReq.headers.value(HttpHeaders.userAgentHeader) == null) {
-          clientReq.headers.set(
-            HttpHeaders.userAgentHeader,
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          );
+        } catch (e) {
+          print('LocalUpdateProxy failed to fetch release notes: $e');
         }
 
-        final clientRes = await clientReq.close();
-        
-        request.response.statusCode = clientRes.statusCode;
-        // Copy response headers
-        clientRes.headers.forEach((name, values) {
-          for (var val in values) {
-            request.response.headers.add(name, val);
-          }
-        });
-
-        await request.response.addStream(clientRes);
+        // Fallback to a simple successful HTML page if fetching notes fails to prevent WinSparkle errors
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.contentType = ContentType.html;
+        request.response.write('<html><body><h3>UniFO Update</h3><p>Phiên bản mới đã sẵn sàng tải về.</p></body></html>');
         await request.response.close();
       } else {
         request.response.statusCode = HttpStatus.notFound;
