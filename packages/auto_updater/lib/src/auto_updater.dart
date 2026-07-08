@@ -139,7 +139,8 @@ class LocalUpdateProxy {
   final HttpClient _client = HttpClient()
     ..badCertificateCallback =
         ((X509Certificate cert, String host, int port) => true)
-    ..connectionTimeout = const Duration(seconds: 15);
+    ..connectionTimeout = const Duration(seconds: 15)
+    ..findProxy = ((uri) => 'DIRECT');
 
   LocalUpdateProxy(this.realXmlUrl);
 
