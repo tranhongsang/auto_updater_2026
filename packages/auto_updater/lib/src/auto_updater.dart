@@ -99,7 +99,7 @@ class AutoUpdater {
         }
         _proxy = LocalUpdateProxy(feedUrl);
         final int port = await _proxy!.start();
-        finalFeedUrl = 'http://127.0.0.1:$port/feed.xml';
+        finalFeedUrl = 'http://localhost:$port/feed.xml';
         print(
             'AutoUpdater proxy started on port $port, forwarding to local feed: $finalFeedUrl');
       } catch (e) {
@@ -210,13 +210,13 @@ class LocalUpdateProxy {
         if (realExeUrl != null && match != null) {
           modifiedXml = modifiedXml.replaceAll(
             match.group(1)!,
-            'http://127.0.0.1:$myPort/download.exe',
+            'http://localhost:$myPort/download.exe',
           );
         }
         if (realReleaseNotesUrl != null && notesMatch != null) {
           modifiedXml = modifiedXml.replaceAll(
             notesMatch.group(1)!,
-            'http://127.0.0.1:$myPort/release_notes.html',
+            'http://localhost:$myPort/release_notes.html',
           );
         }
 
