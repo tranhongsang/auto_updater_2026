@@ -12,7 +12,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with UpdaterListener {
-  final String _feedURL = 'http://localhost:5002/appcast.xml';
+  final String _feedURL = 'https://vgapi-test.cts.vn/foupd/floor/cts_broker_test_update.xml';
 
   bool _isFeedURLSetted = false;
 
