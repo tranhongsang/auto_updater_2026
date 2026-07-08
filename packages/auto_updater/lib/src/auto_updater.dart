@@ -20,7 +20,8 @@ class AutoUpdater {
   final List<UpdaterListener> _listeners = [];
 
   void _handleSparkleEvents(event) {
-    print('AutoUpdater Event Received: type=${event['type']}, data=${event['data']}');
+    print(
+        'AutoUpdater Event Received: type=${event['type']}, data=${event['data']}');
     UpdaterError? updaterError;
     Appcast? appcast;
     AppcastItem? appcastItem;
@@ -99,7 +100,8 @@ class AutoUpdater {
         _proxy = LocalUpdateProxy(feedUrl);
         final int port = await _proxy!.start();
         finalFeedUrl = 'http://localhost:$port/feed.xml';
-        print('AutoUpdater proxy started on port $port, forwarding to local feed: $finalFeedUrl');
+        print(
+            'AutoUpdater proxy started on port $port, forwarding to local feed: $finalFeedUrl');
       } catch (e) {
         print('AutoUpdater failed to start proxy: $e');
       }
@@ -135,7 +137,8 @@ class LocalUpdateProxy {
   String? realExeUrl;
   String? realReleaseNotesUrl;
   final HttpClient _client = HttpClient()
-    ..badCertificateCallback = ((X509Certificate cert, String host, int port) => true)
+    ..badCertificateCallback =
+        ((X509Certificate cert, String host, int port) => true)
     ..connectionTimeout = const Duration(seconds: 15);
 
   LocalUpdateProxy(this.realXmlUrl);
@@ -154,10 +157,11 @@ class LocalUpdateProxy {
       if (path == '/feed.xml') {
         final realUri = Uri.parse(realXmlUrl);
         final clientReq = await _client.getUrl(realUri);
-        
+
         // Copy headers from original request if any
         request.headers.forEach((name, values) {
-          if (name.toLowerCase() != 'host' && name.toLowerCase() != 'connection') {
+          if (name.toLowerCase() != 'host' &&
+              name.toLowerCase() != 'connection') {
             for (var val in values) {
               clientReq.headers.add(name, val);
             }
@@ -171,7 +175,7 @@ class LocalUpdateProxy {
         }
 
         final clientRes = await clientReq.close();
-        
+
         if (clientRes.statusCode != 200) {
           request.response.statusCode = clientRes.statusCode;
           await request.response.close();
@@ -179,7 +183,7 @@ class LocalUpdateProxy {
         }
 
         final xmlContent = await utf8.decoder.bind(clientRes).join();
-        
+
         // Parse the enclosure url from XML
         final match = RegExp(r'url="([^"]+)"').firstMatch(xmlContent);
         if (match != null) {
@@ -188,10 +192,15 @@ class LocalUpdateProxy {
         }
 
         // Parse the release notes url if any
-        final notesMatch = RegExp(r'<(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>([^<]+)</(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>').firstMatch(xmlContent);
+        final notesMatch = RegExp(
+                r'<(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>([^<]+)</(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>')
+            .firstMatch(xmlContent);
         if (notesMatch != null) {
           final extractedNotesUrl = notesMatch.group(1)!.trim();
-          realReleaseNotesUrl = Uri.parse(realXmlUrl).resolve(extractedNotesUrl).toString().replaceAll('&amp;', '&');
+          realReleaseNotesUrl = Uri.parse(realXmlUrl)
+              .resolve(extractedNotesUrl)
+              .toString()
+              .replaceAll('&amp;', '&');
         }
 
         // Rewrite urls in XML to point to our local server
@@ -211,7 +220,8 @@ class LocalUpdateProxy {
         }
 
         request.response.statusCode = HttpStatus.ok;
-        request.response.headers.contentType = ContentType.parse('application/xml; charset=utf-8');
+        request.response.headers.contentType =
+            ContentType.parse('application/xml; charset=utf-8');
         request.response.write(modifiedXml);
         await request.response.close();
       } else if (path == '/download.exe') {
@@ -223,10 +233,11 @@ class LocalUpdateProxy {
 
         final realUri = Uri.parse(realExeUrl!);
         final clientReq = await _client.getUrl(realUri);
-        
+
         // Copy headers
         request.headers.forEach((name, values) {
-          if (name.toLowerCase() != 'host' && name.toLowerCase() != 'connection') {
+          if (name.toLowerCase() != 'host' &&
+              name.toLowerCase() != 'connection') {
             for (var val in values) {
               clientReq.headers.add(name, val);
             }
@@ -240,7 +251,7 @@ class LocalUpdateProxy {
         }
 
         final clientRes = await clientReq.close();
-        
+
         request.response.statusCode = clientRes.statusCode;
         // Copy response headers
         clientRes.headers.forEach((name, values) {
@@ -256,10 +267,11 @@ class LocalUpdateProxy {
           if (realReleaseNotesUrl != null) {
             final realUri = Uri.parse(realReleaseNotesUrl!);
             final clientReq = await _client.getUrl(realUri);
-            
+
             // Copy headers
             request.headers.forEach((name, values) {
-              if (name.toLowerCase() != 'host' && name.toLowerCase() != 'connection') {
+              if (name.toLowerCase() != 'host' &&
+                  name.toLowerCase() != 'connection') {
                 for (var val in values) {
                   clientReq.headers.add(name, val);
                 }
@@ -293,7 +305,8 @@ class LocalUpdateProxy {
         // Fallback to a simple successful HTML page if fetching notes fails to prevent WinSparkle errors
         request.response.statusCode = HttpStatus.ok;
         request.response.headers.contentType = ContentType.html;
-        request.response.write('<html><body><h3>UniFO Update</h3><p>Phiên bản mới đã sẵn sàng tải về.</p></body></html>');
+        request.response.write(
+            '<html><body><h3>UniFO Update</h3><p>Phiên bản mới đã sẵn sàng tải về.</p></body></html>');
         await request.response.close();
       } else {
         request.response.statusCode = HttpStatus.notFound;
