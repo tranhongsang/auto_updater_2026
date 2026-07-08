@@ -139,132 +139,61 @@ class LocalUpdateProxy {
   final HttpClient _client = HttpClient()
     ..badCertificateCallback =
         ((X509Certificate cert, String host, int port) => true)
-    ..connectionTimeout = const Duration(seconds: 15);
+    ..connectionTimeout = const Duration(seconds: 10);
 
   LocalUpdateProxy(this.realXmlUrl);
 
   Future<int> start() async {
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server!.listen(_handleRequest, onError: (e) {
-      print('Proxy server error: $e');
+      print('LocalUpdateProxy server error: $e');
     });
+    print('LocalUpdateProxy listening on port ${_server!.port}');
     return _server!.port;
   }
 
-  void _handleRequest(HttpRequest request) async {
+  /// Fetches URL with a total timeout (connection + response)
+  Future<String?> _fetchUrl(String url, {Duration timeout = const Duration(seconds: 10)}) async {
     try {
-      final path = request.uri.path;
+      print('LocalUpdateProxy fetching: $url');
+      final realUri = Uri.parse(url);
+      final clientReq = await _client.getUrl(realUri);
+      clientReq.headers.set(
+        HttpHeaders.userAgentHeader,
+        'WinSparkle/1.0',
+      );
+
+      final clientRes = await clientReq.close().timeout(timeout);
+
+      if (clientRes.statusCode != 200) {
+        print('LocalUpdateProxy fetch failed: HTTP ${clientRes.statusCode}');
+        await clientRes.drain();
+        return null;
+      }
+
+      final body = await utf8.decoder.bind(clientRes).join().timeout(timeout);
+      print('LocalUpdateProxy fetched ${body.length} bytes from $url');
+      return body;
+    } on TimeoutException {
+      print('LocalUpdateProxy TIMEOUT fetching: $url');
+      return null;
+    } catch (e) {
+      print('LocalUpdateProxy ERROR fetching $url: $e');
+      return null;
+    }
+  }
+
+  void _handleRequest(HttpRequest request) async {
+    final path = request.uri.path;
+    print('LocalUpdateProxy received request: $path');
+
+    try {
       if (path == '/feed.xml') {
-        final realUri = Uri.parse(realXmlUrl);
-        final clientReq = await _client.getUrl(realUri);
-
-        // Copy headers from original request if any
-        request.headers.forEach((name, values) {
-          if (name.toLowerCase() != 'host' &&
-              name.toLowerCase() != 'connection') {
-            for (var val in values) {
-              clientReq.headers.add(name, val);
-            }
-          }
-        });
-        if (clientReq.headers.value(HttpHeaders.userAgentHeader) == null) {
-          clientReq.headers.set(
-            HttpHeaders.userAgentHeader,
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          );
-        }
-
-        final clientRes = await clientReq.close();
-
-        if (clientRes.statusCode != 200) {
-          request.response.statusCode = clientRes.statusCode;
-          await request.response.close();
-          return;
-        }
-
-        final xmlContent = await utf8.decoder.bind(clientRes).join();
-
-        // Parse the enclosure url from XML
-        final match = RegExp(r'url="([^"]+)"').firstMatch(xmlContent);
-        if (match != null) {
-          final extractedUrl = match.group(1)!;
-          realExeUrl = Uri.parse(realXmlUrl).resolve(extractedUrl).toString();
-        }
-
-        // Parse the release notes url if any
-        final notesMatch = RegExp(
-                r'<(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>([^<]+)</(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>')
-            .firstMatch(xmlContent);
-        if (notesMatch != null) {
-          final extractedNotesUrl = notesMatch.group(1)!.trim();
-          realReleaseNotesUrl = Uri.parse(realXmlUrl)
-              .resolve(extractedNotesUrl)
-              .toString()
-              .replaceAll('&amp;', '&');
-        }
-
-        // Rewrite urls in XML to point to our local server
-        final myPort = _server!.port;
-        var modifiedXml = xmlContent;
-        if (realExeUrl != null && match != null) {
-          modifiedXml = modifiedXml.replaceAll(
-            match.group(1)!,
-            'http://localhost:$myPort/download.exe',
-          );
-        }
-        if (realReleaseNotesUrl != null && notesMatch != null) {
-          modifiedXml = modifiedXml.replaceAll(
-            notesMatch.group(1)!,
-            'http://localhost:$myPort/release_notes.html',
-          );
-        }
-
-        request.response.statusCode = HttpStatus.ok;
-        request.response.headers.contentType =
-            ContentType.parse('application/xml; charset=utf-8');
-        request.response.write(modifiedXml);
-        await request.response.close();
+        await _handleFeedXml(request);
       } else if (path == '/download.exe') {
-        if (realExeUrl == null) {
-          request.response.statusCode = HttpStatus.notFound;
-          await request.response.close();
-          return;
-        }
-
-        final realUri = Uri.parse(realExeUrl!);
-        final clientReq = await _client.getUrl(realUri);
-
-        // Copy headers
-        request.headers.forEach((name, values) {
-          if (name.toLowerCase() != 'host' &&
-              name.toLowerCase() != 'connection') {
-            for (var val in values) {
-              clientReq.headers.add(name, val);
-            }
-          }
-        });
-        if (clientReq.headers.value(HttpHeaders.userAgentHeader) == null) {
-          clientReq.headers.set(
-            HttpHeaders.userAgentHeader,
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          );
-        }
-
-        final clientRes = await clientReq.close();
-
-        request.response.statusCode = clientRes.statusCode;
-        // Copy response headers
-        clientRes.headers.forEach((name, values) {
-          for (var val in values) {
-            request.response.headers.add(name, val);
-          }
-        });
-
-        await request.response.addStream(clientRes);
-        await request.response.close();
+        await _handleDownloadExe(request);
       } else if (path == '/release_notes.html') {
-        // Always return local HTML immediately to avoid timeout issues
-        // Release notes are cosmetic - WinSparkle will fail if this takes too long
+        // Always return local HTML immediately - no external fetch needed
         request.response.statusCode = HttpStatus.ok;
         request.response.headers.contentType = ContentType.html;
         request.response.write(
@@ -275,7 +204,112 @@ class LocalUpdateProxy {
         await request.response.close();
       }
     } catch (e) {
-      print('Proxy request handling error: $e');
+      print('LocalUpdateProxy request error ($path): $e');
+      try {
+        request.response.statusCode = HttpStatus.internalServerError;
+        await request.response.close();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _handleFeedXml(HttpRequest request) async {
+    final xmlContent = await _fetchUrl(realXmlUrl);
+
+    if (xmlContent == null || xmlContent.isEmpty) {
+      // CRITICAL FIX: Return a valid "no update" XML instead of an error
+      // This prevents WinSparkle from showing an error dialog
+      print('LocalUpdateProxy: XML fetch failed, returning empty appcast (no update)');
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.contentType =
+          ContentType.parse('application/xml; charset=utf-8');
+      request.response.write(
+          '<?xml version="1.0" encoding="utf-8"?>'
+          '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
+          '<channel><title>No Update</title></channel></rss>');
+      await request.response.close();
+      return;
+    }
+
+    final myPort = _server!.port;
+    var modifiedXml = xmlContent;
+
+    // Parse enclosure URL - target specifically the <enclosure> element's url attribute
+    final enclosureMatch =
+        RegExp(r'<enclosure[^>]+url="([^"]+)"', caseSensitive: false)
+            .firstMatch(xmlContent);
+    if (enclosureMatch != null) {
+      final originalExeUrl = enclosureMatch.group(1)!;
+      realExeUrl =
+          Uri.parse(realXmlUrl).resolve(originalExeUrl).toString();
+      modifiedXml = modifiedXml.replaceFirst(
+        originalExeUrl,
+        'http://localhost:$myPort/download.exe',
+      );
+      print('LocalUpdateProxy: Rewrote enclosure URL: $originalExeUrl -> localhost:$myPort/download.exe');
+    } else {
+      print('LocalUpdateProxy WARNING: No <enclosure url="..."> found in XML');
+    }
+
+    // Parse release notes URL
+    final notesMatch = RegExp(
+            r'<(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>([^<]+)</(?:[a-zA-Z0-9_-]+:)?releaseNotesLink>',
+            caseSensitive: false)
+        .firstMatch(xmlContent);
+    if (notesMatch != null) {
+      final originalNotesUrl = notesMatch.group(1)!.trim();
+      realReleaseNotesUrl = originalNotesUrl;
+      modifiedXml = modifiedXml.replaceFirst(
+        originalNotesUrl,
+        'http://localhost:$myPort/release_notes.html',
+      );
+      print('LocalUpdateProxy: Rewrote release notes URL: $originalNotesUrl -> localhost:$myPort/release_notes.html');
+    }
+
+    // Log final XML for debugging
+    print('LocalUpdateProxy: Serving modified XML (${modifiedXml.length} bytes)');
+
+    request.response.statusCode = HttpStatus.ok;
+    request.response.headers.contentType =
+        ContentType.parse('application/xml; charset=utf-8');
+    request.response.write(modifiedXml);
+    await request.response.close();
+  }
+
+  Future<void> _handleDownloadExe(HttpRequest request) async {
+    if (realExeUrl == null) {
+      print('LocalUpdateProxy: No download URL available');
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+      return;
+    }
+
+    try {
+      print('LocalUpdateProxy: Proxying download from $realExeUrl');
+      final realUri = Uri.parse(realExeUrl!);
+      final clientReq = await _client.getUrl(realUri);
+      clientReq.headers.set(
+        HttpHeaders.userAgentHeader,
+        'WinSparkle/1.0',
+      );
+
+      final clientRes = await clientReq.close().timeout(
+          const Duration(seconds: 10));
+
+      request.response.statusCode = clientRes.statusCode;
+      // Only copy content-related headers
+      if (clientRes.headers.contentType != null) {
+        request.response.headers.contentType = clientRes.headers.contentType!;
+      }
+      final contentLength = clientRes.headers.value(HttpHeaders.contentLengthHeader);
+      if (contentLength != null) {
+        request.response.headers.set(HttpHeaders.contentLengthHeader, contentLength);
+      }
+
+      await request.response.addStream(clientRes);
+      await request.response.close();
+      print('LocalUpdateProxy: Download proxy completed');
+    } catch (e) {
+      print('LocalUpdateProxy: Download proxy error: $e');
       request.response.statusCode = HttpStatus.internalServerError;
       try {
         await request.response.close();
@@ -285,5 +319,6 @@ class LocalUpdateProxy {
 
   Future<void> stop() async {
     await _server?.close(force: true);
+    print('LocalUpdateProxy stopped');
   }
 }
