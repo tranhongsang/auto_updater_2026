@@ -263,46 +263,8 @@ class LocalUpdateProxy {
         await request.response.addStream(clientRes);
         await request.response.close();
       } else if (path == '/release_notes.html') {
-        try {
-          if (realReleaseNotesUrl != null) {
-            final realUri = Uri.parse(realReleaseNotesUrl!);
-            final clientReq = await _client.getUrl(realUri);
-
-            // Copy headers
-            request.headers.forEach((name, values) {
-              if (name.toLowerCase() != 'host' &&
-                  name.toLowerCase() != 'connection') {
-                for (var val in values) {
-                  clientReq.headers.add(name, val);
-                }
-              }
-            });
-            if (clientReq.headers.value(HttpHeaders.userAgentHeader) == null) {
-              clientReq.headers.set(
-                HttpHeaders.userAgentHeader,
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              );
-            }
-
-            final clientRes = await clientReq.close();
-            if (clientRes.statusCode == HttpStatus.ok) {
-              request.response.statusCode = clientRes.statusCode;
-              // Copy response headers
-              clientRes.headers.forEach((name, values) {
-                for (var val in values) {
-                  request.response.headers.add(name, val);
-                }
-              });
-              await request.response.addStream(clientRes);
-              await request.response.close();
-              return;
-            }
-          }
-        } catch (e) {
-          print('LocalUpdateProxy failed to fetch release notes: $e');
-        }
-
-        // Fallback to a simple successful HTML page if fetching notes fails to prevent WinSparkle errors
+        // Always return local HTML immediately to avoid timeout issues
+        // Release notes are cosmetic - WinSparkle will fail if this takes too long
         request.response.statusCode = HttpStatus.ok;
         request.response.headers.contentType = ContentType.html;
         request.response.write(
